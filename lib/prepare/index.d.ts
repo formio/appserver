@@ -5,5 +5,7 @@ export declare const Preppers: {
     persist: (scope: PrepScope) => Promise<void>;
     protect: (scope: PrepScope) => Promise<void>;
     password: (scope: PrepScope) => Promise<void>;
+    referenceLoad: (scope: PrepScope) => Promise<void>;
+    referenceSave: (scope: PrepScope) => Promise<void>;
 };
 export declare const Prepper: PrepperType;

@@ -17,8 +17,8 @@ const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const debug = require('debug')('formio:auth');
 const error = require('debug')('formio:error');
 class Auth {
-    token(user, secret, expire = 240) {
-        return __awaiter(this, void 0, void 0, function* () {
+    token(user_1, secret_1) {
+        return __awaiter(this, arguments, void 0, function* (user, secret, expire = 240) {
             user = Object.assign({}, user);
             delete user.iat;
             delete user.exp;

@@ -1,7 +1,7 @@
-import { Router } from "express";
 import { FormScope } from "./form";
-import { PrepScope, ProcessScope } from "./submission";
+import { PrepScope } from "./submission";
 import { OfflineLicenseStruct } from '@formio/license';
+import { ValidationContext, ProcessTarget } from "@formio/core/types";
 
 export interface ProjectConfig {
     url: string;
@@ -53,9 +53,10 @@ export interface DBConfig {
 export interface ServerDB {
     config: DBConfig;
     connect: (prefix?: string) => Promise<void>;
+    saveOne: (collection: string, doc: any) => Promise<any>;
     save: (collection: string, doc: any) => Promise<any>;
-    load: (collection: string) => Promise<any>;
-    remove: (collection: string) => Promise<any>;
+    load: (collection: string, query?: any) => Promise<any>;
+    remove: (collection: string, query?: any) => Promise<any>;
     index: (scope: FormScope, query: any) => Promise<any>;
     create: (scope: FormScope, doc: any, allowFields?: string[]) => Promise<any>;
     read: (scope: FormScope, id: string) => Promise<any>;
@@ -66,16 +67,12 @@ export interface ServerDB {
     formCollection: (scope: FormScope) => Promise<any>;
     addIndexes: (scope: FormScope, indexes: string[]) => Promise<any>;
     removeIndexes: (scope: FormScope, indexes: string[]) => Promise<any>;
+    isUnique: (scope: FormScope, context: ValidationContext, value: any) => Promise<boolean | string>;
 }
 
 export interface AuthModule {
     token: (user: AuthToken, secret: string, expire: number) => Promise<string>;
     user: (token: string, secret: string) => Promise<AuthToken | null>;
-}
-
-export interface Processor {
-    processors: Array<(scope: ProcessScope) => Promise<any[]>>;
-    process: (scope: ProcessScope) => Promise<any>;
 }
 
 export interface Preppers {
@@ -93,13 +90,14 @@ export interface ServerScope {
     db: ServerDB;
     auth: AuthModule;
     actions: any;
-    processor: Processor;
+    processors: ProcessTarget;
     prepper: Prepper;
     access?: any;
     hooks?: any;
     template?: any;
     utils?: any;
     util?: any;
+    server?: any;
     hook?: (name: string, ...args: any[]) => void;
     licenseKey?: OfflineLicenseStruct;
 }
@@ -108,7 +106,7 @@ export interface AppServerScope {
     config?: ServerConfig;
     db?: ServerDB;
     auth?: AuthModule;
-    processors?: Array<(scope: ProcessScope) => Promise<any[]>>;
+    processors?: ProcessTarget;
     preppers?: Preppers;
     actions?: any;
     hooks?: any;

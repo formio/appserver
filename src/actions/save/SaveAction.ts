@@ -75,13 +75,13 @@ export const SaveAction = {
                 components: []
             };
             const toFields: any = [];
-            await scope.utils.eachComponent(form.components, (component: any) => {
+            await scope.utils.eachComponentAsync(form.components, (component: any) => {
                 if (['button'].indexOf(component.type) !== -1) {
                     return;
                 }
                 toFields.push({ label: component.label || component.key, value: component.key });
             });
-            await scope.utils.eachComponent(scope.form.components, (component: any) => {
+            await scope.utils.eachComponentAsync(scope.form.components, (component: any) => {
                 if (['button'].indexOf(component.type) !== -1) {
                     return;
                 }

@@ -1,7 +1,8 @@
-import { Collection, Db, FindOneAndUpdateOptions, MongoClient, ObjectId } from 'mongodb';
-import pick from 'lodash/pick';
-import omit from 'lodash/omit';
+import { Collection, Db, FindOptions, MongoClient, ObjectId } from 'mongodb';
+import { pick, omit, reduce, set, get, isString, isPlainObject, isArray, isObject, isNumber } from 'lodash';
 import { DBConfig, ServerDB, FormScope } from '@formio/appserver-types';
+import { escapeRegExCharacters } from '@formio/core';
+import { ValidationContext } from '@formio/core/types';
 const debug = require('debug')('formio:db');
 const error = require('debug')('formio:error');
 export class Database implements ServerDB {
@@ -52,8 +53,8 @@ export class Database implements ServerDB {
             if (this.config.dropOnConnect) {
                 await this.db.dropDatabase();
             }
-            this.addIndex(this.db.collection(this.collectionName('project')), 'name');
-            this.defaultCollection = this.db.collection(this.collectionName('submissions'));
+            this.addIndex(this.collection('project'), 'name');
+            this.defaultCollection = this.collection('submissions');
             await this.setupIndexes(this.defaultCollection);
             debug('Connected to database');
         }
@@ -63,37 +64,71 @@ export class Database implements ServerDB {
         }
     }
 
+    collection(name: string): Collection<Document> | null {
+        return this.db ? this.db.collection(this.collectionName(name)) : null;
+    }
+
     // Generic save record method.
     async save(collectionName: string, item: any) {
         if (!this.db) {
             return null;
         }
-        const collection = this.db.collection(`${this.prefix}${collectionName}`);
+        const collection = this.collection(collectionName);
+        if (!collection) {
+            return null;
+        }
         let result;
         try {
             debug('db.save()', collectionName);
-            result = await collection.findOneAndUpdate(
-                {_id: this.ObjectId(item._id)},
-                {$set: omit(item, '_id')},
-                ({upsert: true, returnOriginal: false} as FindOneAndUpdateOptions)
-            );
+            if (item._id) {
+                await collection.updateOne({_id: this.ObjectId(item._id)}, {$set: omit(item, '_id')});
+                return await collection.findOne({_id: this.ObjectId(item._id)});
+            }
+            else {
+                result = await collection.insertOne(item);
+                return await collection.findOne({_id: this.ObjectId(result.insertedId)});
+            }
         }
         catch (err: any) {
             error(err.message);
         }
-        return result ? result.value : null;
+        return null;
+    }
+
+    async saveOne(collectionName: string, item: any) {
+        if (!this.db) {
+            return null;
+        }
+        const collection = this.collection(collectionName);
+        if (!collection) {
+            return null;
+        }
+        if (!item._id) {
+            // Try to load an existing record if one exists.
+            let existing = await this.load(collectionName);
+            if (existing && !existing._id) {
+                existing._id = new ObjectId();
+                const result = await collection.insertOne(existing);
+                existing = await collection.findOne({_id: this.ObjectId(result.insertedId)});
+            }
+            item._id = existing?._id;
+        }
+        return await this.save(collectionName, item);
     }
 
     // Generic load record method.
-    async load(collectionName: string) {
+    async load(collectionName: string, query = {}) {
         if (!this.db) {
             return null;
         }
         debug('db.load()', collectionName);
-        const collection = this.db.collection(this.collectionName(collectionName));
+        const collection = this.collection(collectionName);
+        if (!collection) {
+            return null;
+        }
         let item;
         try {
-            item = await collection.findOne({});
+            item = await collection.findOne(query);
         }
         catch (err: any) {
             error(err.message);
@@ -102,15 +137,18 @@ export class Database implements ServerDB {
     }
 
     // Generic delete record method.
-    async remove(collectionName: string) {
+    async remove(collectionName: string, query = {}) {
         if (!this.db) {
             return null;
         }
         debug('db.remove()', collectionName);
-        const collection = this.db.collection(this.collectionName(collectionName));
+        const collection = this.collection(collectionName);
+        if (!collection) {
+            return null;
+        }
         let result;
         try {
-            result = await collection.deleteOne({});
+            result = await collection.deleteOne(query);
         }
         catch (err: any) {
             error(err.message);
@@ -134,13 +172,13 @@ export class Database implements ServerDB {
             try {
                 debug('db.createCollection()', scope.form.settings.collection);
                 await this.db.createCollection(this.collectionName(scope.form.settings.collection));
-                collection = this.db.collection(this.collectionName(scope.form.settings.collection));
+                collection = this.collection(scope.form.settings.collection);
                 this.setupIndexes(collection, scope)
             }
             catch (err: any) {
                 error(err.message);
             }
-            this.currentCollection = collection || this.db.collection(this.collectionName(scope.form.settings.collection));
+            this.currentCollection = collection || this.collection(scope.form.settings.collection);
             this.currentCollectionName = scope.form.settings.collection;
             return this.currentCollection;
         }
@@ -178,7 +216,7 @@ export class Database implements ServerDB {
         }
 
         if (scope && scope.form && scope.form.components) {
-            scope.utils.eachComponent(scope.form.components, (component: any, components: any[], path: string) => {
+            scope.utils.eachComponent(scope.form.components, (component: any, path: string) => {
                 if (component.dbIndex) {
                     this.addIndex(collection, `data.${path}`);
                 }
@@ -189,7 +227,10 @@ export class Database implements ServerDB {
     /**
      * Add a field index
      */
-    async addIndex(collection: Collection<Document>, path: string) {
+    async addIndex(collection: Collection<Document> | null, path: string) {
+        if (!collection) {
+            return;
+        }
         const index: any = {};
         index[path] = 1;
         try {
@@ -225,7 +266,7 @@ export class Database implements ServerDB {
         index[path] = 1;
         try {
             debug('db.removeIndex()', path);
-            collection.dropIndex(index);
+            await collection.dropIndex(index);
         }
         catch (err: any) {
             error(`Cannot remove index ${path}`, err.message);
@@ -330,7 +371,8 @@ export class Database implements ServerDB {
                 'form',
                 'project',
                 'owner',
-                'access'
+                'access',
+                'state'
             ].concat(allowFields)));
             if (!result.insertedId) {
                 return null;
@@ -405,7 +447,7 @@ export class Database implements ServerDB {
     /**
      * Find a record for a provided query.
      */
-    async findOne(scope: FormScope, query: any = {}) {
+    async findOne(scope: FormScope, query: any = {}, options: FindOptions<Document> = {}) {
         try {
             debug('db.findOne()', query);
             const collection: Collection<Document> | null = await this.formCollection(scope);
@@ -459,7 +501,7 @@ export class Database implements ServerDB {
                 return null;
             }
             const result = await collection.updateOne(this.query(scope, {_id: this.ObjectId(id)}), { 
-                $set: pick(update, ['data', 'metadata', 'modified'].concat(allowFields)) 
+                $set: pick(update, ['data', 'metadata', 'modified', 'state'].concat(allowFields)) 
             });
             if (result.modifiedCount === 0) {
                 return null;
@@ -492,5 +534,130 @@ export class Database implements ServerDB {
             error(err.message);
         }
         return false;
+    }
+
+    addPathQueryParams(pathQueryParams: any, query: any, path: string) {
+        const pathArray = path.split(/\[\d+\]?./);
+        const needValuesInArray = pathArray.length > 1;
+        let pathToValue: string | undefined = path;
+        if (needValuesInArray) {
+            pathToValue = pathArray.shift();
+            if (!pathToValue) {
+                return;
+            }
+            const pathQueryObj = {};
+            reduce(pathArray, (pathQueryPath, pathPart, index) => {
+            const isLastPathPart = index === (pathArray.length - 1);
+            const obj = get(pathQueryObj, pathQueryPath, pathQueryObj);
+            const addedPath = `$elemMatch['${pathPart}']`;
+            set(obj, addedPath, isLastPathPart ? pathQueryParams : {});
+            return pathQueryPath ? `${pathQueryPath}.${addedPath}` : addedPath;
+            }, '');
+            query[pathToValue] = pathQueryObj;
+        }
+        else {
+            query[pathToValue] = pathQueryParams;
+        }
+    }
+    
+    /**
+     * Performs a unique query on the database to see if a value is unique. 
+     *  - If the value is unique, it returns true. 
+     *  - If the value is not unique, it returns the id of the non-unique submission.
+     *  - If an error occurs, or uniqueness cannot be determined, it will throw an error.
+     *
+     * @param scope 
+     * @param context 
+     * @param value 
+     * @returns 
+     */
+    async isUnique(scope: FormScope, context: ValidationContext, value: any): Promise<boolean | string> {
+        const { component, submission, form } = context;
+        const path = `data.${context.path}`;
+        // Build the query
+        const query: any = {form: form._id};
+        let options: FindOptions<Document> = {};
+        if (isString(value)) {
+          if (component.dbIndex) {
+            this.addPathQueryParams(value, query, path);
+          }
+          else if (
+            component.type === 'email' ||
+            (
+              component.type === 'textfield' &&
+              component.validate &&
+              component.validate.pattern === '[A-Za-z0-9]+'
+            )
+          ) {
+            this.addPathQueryParams(value, query, path);
+            options = {collation: {locale: 'en', strength: 2}};
+          }
+          else {
+            this.addPathQueryParams({
+              $regex: new RegExp(`^${escapeRegExCharacters(value)}$`),
+              $options: 'i'
+            }, query, path);
+          }
+        }
+        // FOR-213 - Pluck the unique location id
+        else if (
+          isPlainObject(value) &&
+          value.address &&
+          value.address['address_components'] &&
+          value.address['place_id']
+        ) {
+          this.addPathQueryParams({
+            $regex: new RegExp(`^${escapeRegExCharacters(value.address['place_id'])}$`),
+            $options: 'i'
+          }, query, `${path}.address.place_id`);
+        }
+        // Compare the contents of arrays vs the order.
+        else if (isArray(value)) {
+          this.addPathQueryParams({$all: value}, query, path);
+        }
+        else if (isObject(value) || isNumber(value)) {
+          this.addPathQueryParams({$eq: value}, query, path);
+        }
+        // Only search for non-deleted items
+        query.deleted = {$eq: null};
+        query.state = 'submitted';
+
+        // Perform the query.
+        let result = null;
+        try {
+            result = await this.findOne(scope, query, options);
+            if (!result || (result?._id.toString() === submission?._id)) {
+                return true;
+            }
+            else {
+                return result._id.toString();
+            }
+        }
+        catch (err) {
+            if (options.collation) {
+                // presume this error comes from db compatibility, try again as regex
+                delete query[path];
+                this.addPathQueryParams({
+                    $regex: new RegExp(`^${escapeRegExCharacters(value)}$`),
+                    $options: 'i'
+                }, query, path);
+                try {
+                    result = await this.findOne(scope, query);
+                    if (!result || (result?._id.toString() === submission?._id)) {
+                        return true;
+                    }
+                    else {
+                        component.conflictId = result._id.toString();
+                        return component.conflictId;
+                    }
+                }
+                catch (err) {
+                    throw err;
+                }
+            }
+            else {
+                throw err;
+            }
+        }
     }
 }

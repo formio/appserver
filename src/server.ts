@@ -14,12 +14,12 @@ if (!licenseKey) {
 import { Server as CoreServer } from '@formio/appserver-core';
 import { Database, Auth } from "./modules";
 import Actions from "./actions";
-import { Processor } from "./process";
 import { Prepper } from './prepare';
-import { AppServerScope, Processor as ProcessorType, Prepper as PrepperType, ServerConfig } from '@formio/appserver-types';
+import { AppServerScope } from '@formio/appserver-types';
 import { cwd } from 'process';
 import path from 'path';
 import defaultsDeep from 'lodash/defaultsDeep';
+import { ProcessTargets } from '@formio/core';
 const packageJson = require('../package.json');
 const appCorePackage = require('@formio/appserver-core/package.json');
 const corePackage = require('@formio/core');
@@ -27,7 +27,7 @@ const corePackage = require('@formio/core');
 export const Modules = {
     db: Database,
     auth: Auth,
-    processor: Processor,
+    processors: ProcessTargets,
     prepper: Prepper,
     actions: Actions
 };
@@ -35,7 +35,7 @@ export const Modules = {
 export class Server extends CoreServer {
     constructor(config: AppServerScope = {}) {
         if (config.processors) {
-            Modules.processor.processors = config.processors;
+            Modules.processors = config.processors;
         }
         if (config.preppers) {
             Modules.prepper.preppers = config.preppers;
@@ -48,7 +48,7 @@ export class Server extends CoreServer {
                 url: get(process.env, 'MONGO', "mongodb://localhost:27017/appserver"),
                 config: get(process.env, 'MONGO_CONFIG', "{}")
             }),
-            processor: Modules.processor,
+            processors: Modules.processors,
             prepper: Modules.prepper,
             auth: config.auth || new Modules.auth(),
             actions: {...Modules.actions, ...config.actions},
@@ -77,7 +77,6 @@ export class Server extends CoreServer {
 }
 
 export { Prepper };
-export { Processor };
 export { Database };
 export { Auth };
 export { Actions };

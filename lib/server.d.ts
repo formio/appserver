@@ -1,14 +1,14 @@
+/// <reference types="express" />
 import { Server as CoreServer } from '@formio/appserver-core';
 import { Database, Auth } from "./modules";
 import Actions from "./actions";
-import { Processor } from "./process";
 import { Prepper } from './prepare';
-import { AppServerScope, Processor as ProcessorType, Prepper as PrepperType } from '@formio/appserver-types';
+import { AppServerScope } from '@formio/appserver-types';
 export declare const Modules: {
     db: typeof Database;
     auth: typeof Auth;
-    processor: ProcessorType;
-    prepper: PrepperType;
+    processors: ProcessTarget;
+    prepper: import("@formio/appserver-types").Prepper;
     actions: {
         save: {
             readonly info: {
@@ -172,7 +172,6 @@ export declare class Server extends CoreServer {
     constructor(config?: AppServerScope);
 }
 export { Prepper };
-export { Processor };
 export { Database };
 export { Auth };
 export { Actions };
